@@ -1,0 +1,94 @@
+---
+title: "Data Analysis"
+author: "Brendan Chapuis"
+date: "4/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r libraries, include = FALSE}
+
+library(lubridate)
+library(tidyverse)
+
+```
+
+
+```{r data, echo = FALSE}
+
+dem_primary <- read.csv("data/processed-data/dem_primary.csv") %>% 
+  select(-X)
+
+final_results_data <- read.csv("data/processed-data/final_results_data.csv") %>% 
+  select(-X)
+
+```
+
+
+```{r analysis, echo = FALSE}
+
+results_prediction <- final_results_data %>%
+  group_by(state) %>%
+  arrange(desc(average_prediction)) %>%
+  mutate(average_prediction_rank = 1:n()) %>%
+  arrange(desc(poll_trend_adjusted)) %>%
+  mutate(poll_rank = 1:n()) %>%
+  arrange(desc(market_close)) %>%
+  mutate(market_rank = 1:n()) %>%
+  ungroup() %>%
+  filter(final_rank == 1) %>%
+  mutate(average_prediction_correct = ifelse(average_prediction_rank == final_rank, 1, 0),
+         poll_correct = ifelse(poll_rank == final_rank, 1, 0),
+         market_correct = ifelse(market_rank == final_rank, 1, 0)) %>%
+  summarize(percent_accuracy_average = sum(average_prediction_correct)/n(),
+            percent_accuracy_poll = sum(poll_correct)/n(),
+            percent_accuracy_market = sum(market_correct)/n())
+
+final_results_data %>%
+   select(vote_percent, market_close, poll_trend_adjusted) %>%
+   cor()
+
+
+poll_model <- lm(formula = vote_percent ~ poll_estimate, data = final_results_data)
+
+market_model <- lm(formula = vote_percent ~ poly(market_close, 3, raw=TRUE), data = final_results_data)
+
+final_results_data$poll_model <- predict(poll_model, newdata = final_results_data)
+
+final_results_data$market_model <- predict(market_model, newdata = final_results_data)
+
+final_results_data %>%
+  lm(formula = vote_percent ~ poll_estimate, data = .) %>%
+  augment() %>%
+  ggplot(aes(x = vote_percent, y = .resid)) +
+  geom_point() +
+  stat_smooth()
+  geom_segment(aes(x = vote_percent, y = 0, xend = vote_percent, yend = .resid))
+
+final_results_data %>%
+  lm(formula = vote_percent ~ poly(market_close, 3, raw=TRUE), data = .) %>%
+  augment() %>%
+  ggplot(aes(x = vote_percent, y = .resid)) +
+  geom_point() +
+  stat_smooth()
+  geom_segment(aes(x = vote_percent, y = 0, xend = vote_percent, yend = .resid))
+
+
+
+final_results_data %>%
+  ggplot(aes(x = poll_estimate)) +
+  geom_point(aes(y = vote_percent)) +
+  geom_line(aes(y = poll_model)) +
+  geom_segment(aes(x = poll_estimate, y = vote_percent, xend = poll_estimate, yend = poll_model))
+
+final_results_data %>%
+  ggplot(aes(x = market_close)) +
+  geom_point(aes(y = vote_percent, color = num_candidates)) +
+  geom_line(aes(y = market_model)) +
+  geom_segment(aes(x = market_close, y = vote_percent, xend = market_close, yend = market_model))
+
+3```
