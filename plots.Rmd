@@ -1,5 +1,5 @@
 ---
-title: "Plots"
+title: "Prediction Market Price, Polling Average, and Vote Percent"
 author: "Brendan Chapuis"
 date: "4/10/2020"
 output: html_document
@@ -11,26 +11,35 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r libraries, include = FALSE}
 
+library(readr)
 library(tidyverse)
 
 ```
 
-```{r data, echo = FALSE}
+```{r data, include = FALSE}
 
-dem_primary <- read.csv("data/processed-data/dem_primary.csv") %>% 
-  select(-X)
+dem_primary <- read_csv("data/processed-data/dem_primary.csv") %>% 
+  select(-X1)
 
-final_results_data <- read.csv("data/processed-data/final_results_data.csv") %>% 
-  select(-X)
+final_results_data <- read_csv("data/processed-data/final_results_data.csv") %>% 
+  select(-X1)
 
 ```
+
+```{r}
+
+
+
+```
+
 
 ```{r market_and_votes, echo = FALSE}
 
 final_results_data %>%
+  mutate(winner = ifelse(winner == 1, "Yes", "No")) %>% 
   ggplot(aes(x = poll_estimate, y = vote_percent)) +
   geom_point(aes(color = winner), alpha = 0.75) +
-  stat_smooth(method="lm", se=TRUE) +
+  stat_smooth(method="lm", formula = y~x, se=TRUE) +
   theme_minimal() +
   theme(legend.position="bottom") +
   labs(title = "Relationship Between Final Polling Average and Percent of Vote",
@@ -44,6 +53,7 @@ final_results_data %>%
 ``` {r poll_and_votes, echo = FALSE}
 
 final_results_data %>%
+  mutate(winner = ifelse(winner == 1, "Yes", "No")) %>% 
   ggplot(aes(x = market_close, y = vote_percent)) +
   geom_point(aes(color = winner), alpha = 0.75) +
   stat_smooth(method="lm",

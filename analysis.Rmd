@@ -3,6 +3,8 @@ title: "Data Analysis"
 author: "Brendan Chapuis"
 date: "4/10/2020"
 output: html_document
+editor_options: 
+  chunk_output_type: inline
 ---
 
 ```{r setup, include=FALSE}
@@ -13,6 +15,11 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r libraries, include = FALSE}
 
 library(lubridate)
+library(randomForest)
+library(tidymodels)
+library(forcats)
+library(broom)
+library(readr)
 library(tidyverse)
 
 ```
@@ -20,39 +27,100 @@ library(tidyverse)
 
 ```{r data, echo = FALSE}
 
-dem_primary <- read.csv("data/processed-data/dem_primary.csv") %>% 
-  select(-X)
+dem_primary <- read_csv("data/processed-data/dem_primary.csv") %>% 
+  select(-X1)
 
-final_results_data <- read.csv("data/processed-data/final_results_data.csv") %>% 
-  select(-X)
+final_results_data <- read_csv("data/processed-data/final_results_data.csv") %>% 
+  select(-X1)
+
+```
+
+```{r}
+final_results_data <- dem_primary %>% 
+  group_by(state) %>% 
+  mutate(change_poll = poll_estimate - lag(poll_estimate),
+         poll_change_sign = ifelse(change_poll < 0, 0, 1)) %>% ungroup() %>% 
+  filter(date == contest_date - 1) %>% 
+  select(name, state, poll_change_sign) %>% 
+  inner_join(final_results_data, by = c(name = "name", state = "state"))
 
 ```
 
 
 ```{r analysis, echo = FALSE}
 
-results_prediction <- final_results_data %>%
-  group_by(state) %>%
-  arrange(desc(average_prediction)) %>%
-  mutate(average_prediction_rank = 1:n()) %>%
-  arrange(desc(poll_trend_adjusted)) %>%
-  mutate(poll_rank = 1:n()) %>%
-  arrange(desc(market_close)) %>%
-  mutate(market_rank = 1:n()) %>%
-  ungroup() %>%
-  filter(final_rank == 1) %>%
-  mutate(average_prediction_correct = ifelse(average_prediction_rank == final_rank, 1, 0),
-         poll_correct = ifelse(poll_rank == final_rank, 1, 0),
-         market_correct = ifelse(market_rank == final_rank, 1, 0)) %>%
-  summarize(percent_accuracy_average = sum(average_prediction_correct)/n(),
-            percent_accuracy_poll = sum(poll_correct)/n(),
-            percent_accuracy_market = sum(market_correct)/n())
-
-final_results_data %>%
-   select(vote_percent, market_close, poll_trend_adjusted) %>%
-   cor()
 
 
+predictions <- final_results_data %>%
+  group_by(state) %>% 
+  arrange(desc(market_close)) %>% 
+  mutate(winner = as.numeric(as.character(winner)),
+         market_rank = 1:n(),
+         market_winner = ifelse(market_rank == 1, 1, 0),
+         poll_cutoff = ifelse(poll_estimate > 0.1, 1, 0),
+         viable_candidates = sum(poll_cutoff),
+         num_candidates = n()) %>%
+  arrange(desc(poll_estimate)) %>% 
+  mutate(poll_rank = 1:n(),
+         poll_winner = ifelse(poll_rank == 1, 1, 0),
+         log_market = qlogis(market_close),
+         neg_log = ifelse(log_market < 0, 1, 0)) %>% 
+  ungroup()
+
+forest_mod <- rand_forest() %>%
+  set_engine("randomForest") %>%
+  set_mode("classification")
+
+logistic_mod <- logistic_reg() %>%
+  set_engine("glm")
+
+logistic_fit <- fit(logistic_mod,
+                    factor(winner) ~ poll_estimate + market_close,
+                    data = predictions)
+
+vote_forest <- fit(forest_mod,
+                    factor(winner) ~ poll_estimate,
+                    data = predictions)
+
+sixteen <- tibble(poll_estimate = c(.479), market_close = c(0.69))
+
+predict(logistic_fit, new_data = sixteen) %>%  pull(.pred_class)
+
+predictions %>% 
+  mutate(forest_prediction = predict(vote_forest, new_data = predictions) %>%  pull(.pred_class),
+         logistic_prediction = predict(logistic_fit, new_data = predictions) %>%  pull(.pred_class)) %>% 
+  filter(winner == 1) %>%
+  view()
+  summarize(forest_correct = sum(as.numeric(as.character(forest_prediction)))/n(),
+            logistic_correct = sum(as.numeric(as.character(logistic_prediction)))/n())
+
+predictions %>% 
+  filter(winner == 1) %>% 
+  lm(vote_percent ~ num_candidates, data = .) %>% 
+  summary()
+
+predictions %>% 
+  ggplot(aes(x = num_candidates, y = vote_percent)) +
+  geom_point()
+
+predictions %>% 
+  lm(vote_percent ~ poll_estimate * poly(market_close, 3, raw=TRUE), data = .) %>%
+  summary()
+
+  augment(newdata = predictions) %>% 
+  group_by(state) %>% 
+  arrange(desc(.fitted)) %>% 
+  mutate(predicted_rank = 1:n()) %>%
+  ungroup() %>% 
+  filter(final_rank == 1) %>% 
+  mutate(predicted_correct = ifelse(final_rank == predicted_rank, 1, 0)) %>%
+  summarize(percent_correct = sum(predicted_correct)/n())
+  
+predictions %>% 
+  filter(final_rank == 1) %>% 
+  mutate(correct = ifelse(final_rank == poll_rank, 1, 0)) %>% 
+  summarize(percent_correct = sum(correct)/n())
+  
 poll_model <- lm(formula = vote_percent ~ poll_estimate, data = final_results_data)
 
 market_model <- lm(formula = vote_percent ~ poly(market_close, 3, raw=TRUE), data = final_results_data)
@@ -61,34 +129,5 @@ final_results_data$poll_model <- predict(poll_model, newdata = final_results_dat
 
 final_results_data$market_model <- predict(market_model, newdata = final_results_data)
 
-final_results_data %>%
-  lm(formula = vote_percent ~ poll_estimate, data = .) %>%
-  augment() %>%
-  ggplot(aes(x = vote_percent, y = .resid)) +
-  geom_point() +
-  stat_smooth()
-  geom_segment(aes(x = vote_percent, y = 0, xend = vote_percent, yend = .resid))
 
-final_results_data %>%
-  lm(formula = vote_percent ~ poly(market_close, 3, raw=TRUE), data = .) %>%
-  augment() %>%
-  ggplot(aes(x = vote_percent, y = .resid)) +
-  geom_point() +
-  stat_smooth()
-  geom_segment(aes(x = vote_percent, y = 0, xend = vote_percent, yend = .resid))
-
-
-
-final_results_data %>%
-  ggplot(aes(x = poll_estimate)) +
-  geom_point(aes(y = vote_percent)) +
-  geom_line(aes(y = poll_model)) +
-  geom_segment(aes(x = poll_estimate, y = vote_percent, xend = poll_estimate, yend = poll_model))
-
-final_results_data %>%
-  ggplot(aes(x = market_close)) +
-  geom_point(aes(y = vote_percent, color = num_candidates)) +
-  geom_line(aes(y = market_model)) +
-  geom_segment(aes(x = market_close, y = vote_percent, xend = market_close, yend = market_model))
-
-3```
+```

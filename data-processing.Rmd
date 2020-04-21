@@ -118,7 +118,7 @@ final_results <- function(link, num_candidates, state_name, num_col = 4, nodes =
            date == contest_date - 1) %>% 
     left_join(results_data, by = c(name = "name", state = "state")) %>% 
     filter(vote_percent > 0) %>% 
-    select(state, name, vote_percent, market_close, poll_estimate, poll_trend_adjusted, final_rank, contest_date) %>% 
+    select(state, name, vote_percent, market_close, poll_estimate, poll_trend_adjusted, final_rank, contest_date, date_dropped) %>% 
     rbind(final_results_data)
 }
 
@@ -181,14 +181,32 @@ dem_primary <- add_market_data("data/Vermont.csv", "Vermont")
 
 dem_primary <- add_market_data("data/Virginia.csv", "Virginia")
 
+dem_primary <- add_market_data("data/Washington.csv", "Washington")
+
+dem_primary <- add_market_data("data/Wisconsin.csv", "Wisconsin")
+
+dem_primary <- add_market_data("data/Alaska.csv", "Alaska")
+
 dem_primary <- dem_primary %>% 
-  filter(!is.na(market_close), !is.na(poll_trend_adjusted))
+  filter(!is.na(market_close), !is.na(poll_trend_adjusted)) %>% 
+  mutate(date_dropped = case_when(name == "Bernie Sanders" ~ "04/08/2020",
+                                  name == "Tulsi Gabbard" ~ "03/19/2020",
+                                  name == "Elizabeth Warren" ~ "03/05/2020",
+                                  name == "Michael Bloomberg" ~ "03/04/2020",
+                                  name == "Amy Klobuchar" ~ "03/02/2020",
+                                  name == "Pete Buttigieg" ~ "03/01/2020",
+                                  name == "Tom Steyer" ~ "02/29/2020",
+                                  name == "Deval Patrick" ~ "02/12/2020",
+                                  name == "Andrew Yang" ~ "02/11/2020"),
+         date_dropped = as.Date(date_dropped, "%m/%d/%Y"))
 
 ```
 
 ```{r final_results_data, include = FALSE, cache = TRUE}
 
 final_results_data = NULL
+
+final_results_data <- final_results("https://www.nytimes.com/interactive/2020/02/04/us/elections/results-iowa-caucus.html", 14, "Iowa")
 
 final_results_data <- final_results("https://www.nytimes.com/interactive/2020/02/11/us/elections/results-new-hampshire-primary-election.html", 35, "New Hampshire")
 
@@ -238,21 +256,16 @@ final_results_data <- final_results("https://www.nytimes.com/interactive/2020/03
 
 final_results_data <- final_results("https://www.nytimes.com/interactive/2020/03/03/us/elections/results-north-carolina-primary-elections.html", 21, num_col = 3, "North Carolina")
 
+final_results_data <- final_results("https://www.nytimes.com/interactive/2020/03/10/us/elections/results-washington-president-democrat-primary-election.html", 14, num_col = 3, "Washington")
+
+final_results_data <- final_results("https://www.nytimes.com/interactive/2020/04/07/us/elections/results-wisconsin-president-democrat-primary-election.html", 13, "Wisconsin")
+
+final_results_data <- final_results("https://www.nytimes.com/interactive/2020/04/11/us/elections/results-alaska-president-democrat-primary-election.html?action=click&module=ELEX_results&pgtype=Interactive&region=StateNavigation", 5, "Alaska")
+
 final_results_data <- final_results_data %>%
-  mutate(date_dropped = case_when(name == "Tulsi Gabbard" ~ "03/19/2020",
-                                  name == "Elizabeth Warren" ~ "03/05/2020",
-                                  name == "Michael Bloomberg" ~ "03/04/2020",
-                                  name == "Amy Klobuchar" ~ "03/02/2020",
-                                  name == "Pete Buttigieg" ~ "03/01/2020",
-                                  name == "Tom Steyer" ~ "02/29/2020",
-                                  name == "Deval Patrick" ~ "02/12/2020",
-                                  name == "Andrew Yang" ~ "02/11/2020"),
-         date_dropped = as.Date(date_dropped, "%m/%d/%Y")) %>%
   filter(date_dropped >= contest_date | is.na(date_dropped)) %>%
-  mutate(winner = as.factor(ifelse(final_rank == 1, "Yes", "No"))) %>%
+  mutate(winner = ifelse(final_rank == 1, 1, 0)) %>%
   group_by(state) %>%
-  mutate(poll_cutoff = ifelse(poll_estimate > 0.05, 1, 0),
-         viable_candidates = sum(poll_cutoff)) %>%
   ungroup()
 
 ```
