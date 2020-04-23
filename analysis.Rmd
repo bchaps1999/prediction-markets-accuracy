@@ -19,6 +19,8 @@ library(randomForest)
 library(tidymodels)
 library(forcats)
 library(broom)
+library(rsample)
+library(yardstick)
 library(readr)
 library(tidyverse)
 
@@ -36,20 +38,38 @@ final_results_data <- read_csv("data/processed-data/final_results_data.csv") %>%
 ```
 
 ```{r}
-final_results_data <- dem_primary %>% 
-  group_by(state) %>% 
-  mutate(change_poll = poll_estimate - lag(poll_estimate),
-         poll_change_sign = ifelse(change_poll < 0, 0, 1)) %>% ungroup() %>% 
-  filter(date == contest_date - 1) %>% 
-  select(name, state, poll_change_sign) %>% 
-  inner_join(final_results_data, by = c(name = "name", state = "state"))
+
+forest_mod <- rand_forest() %>%
+  set_engine("randomForest") %>%
+  set_mode("classification")
+
+logistic_mod <- logistic_reg() %>%
+  set_engine("glm")
+
+vote_split <- initial_split(final_results_data)
+vote_train <- training(vote_split)
+vote_test <- testing(vote_split)
+
+logistic_fit <- fit(logistic_mod,
+                    factor(winner) ~ poll_estimate + market_close,
+                    data = vote_train)
+
+vote_forest <- fit(forest_mod,
+                    factor(winner) ~ poll_estimate,
+                    data = vote_train)
+
+poll_market_form <- formula(factor(winner) ~ poll_estimate + market_close)
+
+logistic_mod %>%
+  fit(poll_market_form, data = vote_train) %>%
+  predict(new_data = vote_test) %>%
+  bind_cols(vote_test) %>% 
+  rmse(truth = winner, estimate = .pred_class)
 
 ```
 
 
 ```{r analysis, echo = FALSE}
-
-
 
 predictions <- final_results_data %>%
   group_by(state) %>% 
@@ -67,24 +87,6 @@ predictions <- final_results_data %>%
          neg_log = ifelse(log_market < 0, 1, 0)) %>% 
   ungroup()
 
-forest_mod <- rand_forest() %>%
-  set_engine("randomForest") %>%
-  set_mode("classification")
-
-logistic_mod <- logistic_reg() %>%
-  set_engine("glm")
-
-logistic_fit <- fit(logistic_mod,
-                    factor(winner) ~ poll_estimate + market_close,
-                    data = predictions)
-
-vote_forest <- fit(forest_mod,
-                    factor(winner) ~ poll_estimate,
-                    data = predictions)
-
-sixteen <- tibble(poll_estimate = c(.479), market_close = c(0.69))
-
-predict(logistic_fit, new_data = sixteen) %>%  pull(.pred_class)
 
 predictions %>% 
   mutate(forest_prediction = predict(vote_forest, new_data = predictions) %>%  pull(.pred_class),
