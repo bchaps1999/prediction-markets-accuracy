@@ -17,7 +17,9 @@ knitr::opts_chunk$set(echo = TRUE)
 library(lubridate)
 library(randomForest)
 library(tidymodels)
+library(plotrix)
 library(forcats)
+library(gt)
 library(broom)
 library(rsample)
 library(yardstick)
@@ -29,107 +31,116 @@ library(tidyverse)
 
 ```{r data, echo = FALSE}
 
-dem_primary <- read_csv("data/processed-data/dem_primary.csv") %>% 
-  select(-X1)
+dem_primary <- read_csv(
+  "data/processed-data/dem_primary.csv",
+  col_types = cols(
+    state = col_character(),
+    contest_date = col_date(format = ""),
+    name = col_character(),
+    date = col_date(format = ""),
+    market_close = col_double(),
+    poll_estimate = col_double(),
+    poll_trend_adjusted = col_double(),
+    date_dropped = col_date(format = "")
+  )
+)
 
-final_results_data <- read_csv("data/processed-data/final_results_data.csv") %>% 
-  select(-X1)
-
-```
-
-```{r}
-
-forest_mod <- rand_forest() %>%
-  set_engine("randomForest") %>%
-  set_mode("classification")
-
-logistic_mod <- logistic_reg() %>%
-  set_engine("glm")
-
-vote_split <- initial_split(final_results_data)
-vote_train <- training(vote_split)
-vote_test <- testing(vote_split)
-
-logistic_fit <- fit(logistic_mod,
-                    factor(winner) ~ poll_estimate + market_close,
-                    data = vote_train)
-
-vote_forest <- fit(forest_mod,
-                    factor(winner) ~ poll_estimate,
-                    data = vote_train)
-
-poll_market_form <- formula(factor(winner) ~ poll_estimate + market_close)
-
-logistic_mod %>%
-  fit(poll_market_form, data = vote_train) %>%
-  predict(new_data = vote_test) %>%
-  bind_cols(vote_test) %>% 
-  rmse(truth = winner, estimate = .pred_class)
-
+final_results <- dem_primary %>% 
+  filter(date == contest_date -1)
+    
 ```
 
 
 ```{r analysis, echo = FALSE}
 
-predictions <- final_results_data %>%
-  group_by(state) %>% 
+
+
+predictions <- final_results %>%
+  group_by(state, year) %>% 
   arrange(desc(market_close)) %>% 
-  mutate(winner = as.numeric(as.character(winner)),
-         market_rank = 1:n(),
+  mutate(market_rank = 1:n(),
          market_winner = ifelse(market_rank == 1, 1, 0),
-         poll_cutoff = ifelse(poll_estimate > 0.1, 1, 0),
-         viable_candidates = sum(poll_cutoff),
-         num_candidates = n()) %>%
+         market_correct = ifelse(market_winner == winner, 1, 0)) %>%
   arrange(desc(poll_estimate)) %>% 
   mutate(poll_rank = 1:n(),
          poll_winner = ifelse(poll_rank == 1, 1, 0),
-         log_market = qlogis(market_close),
-         neg_log = ifelse(log_market < 0, 1, 0)) %>% 
+         poll_correct = ifelse(poll_winner == winner,1,0)) %>% 
   ungroup()
 
+# Simple percent accuracy
 
 predictions %>% 
-  mutate(forest_prediction = predict(vote_forest, new_data = predictions) %>%  pull(.pred_class),
-         logistic_prediction = predict(logistic_fit, new_data = predictions) %>%  pull(.pred_class)) %>% 
-  filter(winner == 1) %>%
-  view()
-  summarize(forest_correct = sum(as.numeric(as.character(forest_prediction)))/n(),
-            logistic_correct = sum(as.numeric(as.character(logistic_prediction)))/n())
+  summarize(poll_accuracy = round(sum(poll_correct)/n() * 100, 2),
+            market_accuracy = round(sum(market_correct)/n() * 100, 2)) %>% 
+  gt() %>% 
+  tab_header(title = "Percent Accuracy of Polls and Prediction Market",
+             subtitle = "For Predicting Election Winner") %>% 
+  cols_label(poll_accuracy = "Polling Average Accuracy",
+             market_accuracy = "Market Price Accuracy")
 
-predictions %>% 
-  filter(winner == 1) %>% 
-  lm(vote_percent ~ num_candidates, data = .) %>% 
-  summary()
+# Percent error from prediction
+final_results %>% 
+  mutate(market_error = abs(market_close - vote_percent),
+         poll_error = abs(poll_estimate - vote_percent)) %>%
+  filter(!is.na(market_error) | !is.na(poll_error)) %>% 
+  summarize(average_market_error = round(mean(market_error) * 100,2),
+            average_poll_error = round(mean(poll_error)*100,2)) %>% 
+  gt() %>% 
+  tab_header(title = "Average Percent Error of Polls and Prediction Market",
+             subtitle = "For Predicting Vote Percent") %>% 
+  cols_label(average_market_error = "Market Average Error",
+             average_poll_error = "Poll Average Error")
 
-predictions %>% 
-  ggplot(aes(x = num_candidates, y = vote_percent)) +
-  geom_point()
 
-predictions %>% 
-  lm(vote_percent ~ poll_estimate * poly(market_close, 3, raw=TRUE), data = .) %>%
-  summary()
+# Logistic model for predicting winner
 
-  augment(newdata = predictions) %>% 
-  group_by(state) %>% 
-  arrange(desc(.fitted)) %>% 
-  mutate(predicted_rank = 1:n()) %>%
-  ungroup() %>% 
-  filter(final_rank == 1) %>% 
-  mutate(predicted_correct = ifelse(final_rank == predicted_rank, 1, 0)) %>%
-  summarize(percent_correct = sum(predicted_correct)/n())
+logistic_mod <- logistic_reg() %>%
+    set_engine("glm") %>%
+    set_mode("classification")
+
+winner_predictions <- NULL
+
+for (val in 1:100) {
   
-predictions %>% 
-  filter(final_rank == 1) %>% 
-  mutate(correct = ifelse(final_rank == poll_rank, 1, 0)) %>% 
-  summarize(percent_correct = sum(correct)/n())
+  vote_split <- initial_split(final_results)
+  vote_train <- training(vote_split)
+  vote_test <- testing(vote_split)
   
-poll_model <- lm(formula = vote_percent ~ poll_estimate, data = final_results_data)
+  winner_predictions <- logistic_mod %>%
+    fit(factor(winner) ~ market_close, data = vote_train) %>%
+    predict(new_data = vote_test) %>%
+    bind_cols(vote_test) %>%
+    mutate(model_predicted = .pred_class) %>%
+    mutate(model_correct = ifelse(model_predicted == winner, 1, 0)) %>%
+    summarize(model_accuracy = sum(model_correct) / n()) %>%
+    rbind(winner_predictions)
+  
+}
 
-market_model <- lm(formula = vote_percent ~ poly(market_close, 3, raw=TRUE), data = final_results_data)
+winner_predictions %>% 
+  summarize(average_accuracy = paste(round(mean(model_accuracy) * 100, 2), "%", sep = ""),
+            std_error = round(std.error(model_accuracy) * 100, 2)) %>% 
+  gt() %>% 
+  tab_header(title = "Average Accuracy of Model Predictions",
+             subtitle = "For 1000 Simulations with Resampling of Training and Test Group") %>% 
+  cols_label(average_accuracy = "Average Accuracy",
+             std_error = "Standard Error")
 
-final_results_data$poll_model <- predict(poll_model, newdata = final_results_data)
+# Linear model for predicting vote percent
 
-final_results_data$market_model <- predict(market_model, newdata = final_results_data)
+linear_mod <- linear_reg() %>%
+  set_engine("lm") %>% 
+  set_mode("regression")
 
+linear_mod %>%
+  fit(vote_percent ~ poll_estimate * poly(market_close, 3, raw=TRUE), data = vote_train) %>%
+  predict(new_data = vote_test) %>%
+  bind_cols(vote_test) %>%
+  mutate(model_predicted = .pred) %>%
+  mutate(model_error = abs(model_predicted - vote_percent)) %>%
+  filter(!is.na(model_error)) %>%
+  summarize(average_model_error = round(mean(model_error) * 100,2)) %>%
+  rbind(vote_predictions_one)
+  
 
 ```
