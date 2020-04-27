@@ -1,0 +1,12 @@
+name: rough_draft
+title: rough_draft
+username:
+account: bchapuis
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 2182912
+bundleId: 3062424
+url: https://bchapuis.shinyapps.io/rough_draft/
+when: 1587784960.28614
+asMultiple: FALSE
+asStatic: FALSE
