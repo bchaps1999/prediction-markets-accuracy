@@ -18,24 +18,26 @@ library(tidyverse)
 
 ```{r data, include = FALSE}
 
-dem_primary <- read_csv("data/processed-data/dem_primary.csv") %>% 
-  select(-X1)
-
-final_results_data <- read_csv("data/processed-data/final_results_data.csv") %>% 
-  select(-X1)
+dem_primary <- read_csv("data/processed-data/dem_primary.csv", col_types = cols(
+  year = col_double(),
+  state = col_character(),
+  name = col_character(),
+  date = col_date(format = ""),
+  contest_date = col_date(format = ""),
+  market_close = col_double(),
+  poll_estimate = col_double(),
+  poll_trend_adjusted = col_double(),
+  date_dropped = col_date(format = ""),
+  vote_percent = col_double(),
+  winner = col_double()
+)) 
 
 ```
-
-```{r}
-
-
-
-```
-
 
 ```{r market_and_votes, echo = FALSE}
 
-final_results_data %>%
+dem_primary %>%
+  filter(date == contest_date - 1) %>% 
   mutate(winner = ifelse(winner == 1, "Yes", "No")) %>% 
   ggplot(aes(x = poll_estimate, y = vote_percent)) +
   geom_point(aes(color = winner), alpha = 0.75) +
@@ -43,7 +45,7 @@ final_results_data %>%
   theme_minimal() +
   theme(legend.position="bottom") +
   labs(title = "Relationship Between Final Polling Average and Percent of Vote",
-       subtitle = "for Candidates in 2020 Democratic Primaries and Caucuses",
+       subtitle = "for Candidates in 2016/2020 Democratic Primaries and Caucuses",
        x = "Final Polling Average from FiveThirtyEight",
        y = "Percent of Vote in Election",
        color = "Election Winner")
@@ -52,8 +54,9 @@ final_results_data %>%
 
 ``` {r poll_and_votes, echo = FALSE}
 
-final_results_data %>%
-  mutate(winner = ifelse(winner == 1, "Yes", "No")) %>% 
+dem_primary %>%
+  filter(date == contest_date - 1) %>%
+  mutate(winner = ifelse(winner == 1, "Yes", "No")) %>%
   ggplot(aes(x = market_close, y = vote_percent)) +
   geom_point(aes(color = winner), alpha = 0.75) +
   stat_smooth(method="lm",
@@ -61,10 +64,28 @@ final_results_data %>%
   theme_minimal() +
   theme(legend.position="bottom") +
   labs(title = "Relationship Between Final Prediction Market Price and Vote Percent",
-       subtitle = "for Candidates in 2020 Democratic Primaries and Caucuses",
+       subtitle = "for Candidates in 2016/2020 Democratic Primaries and Caucuses",
        x = "Final Closing Market Price on PredictIt",
        y = "Percent of Vote in Election",
        color = "Election Winner")
+
+```
+
+```{r winner_regression, echo = FALSE}
+
+final_results <- dem_primary %>% 
+  filter(date == contest_date -1)
+
+final_results %>%
+  ggplot(aes(x = market_close, y = winner)) + 
+  geom_point(alpha = 0.3) + 
+  theme_grey() + 
+  stat_smooth(method="glm", method.args=list(family="binomial"), se=FALSE) + 
+  labs(title = "Probability of Winning an Election Based on Market Price",
+       subtitle = "Using a Logistic Regression Model",
+       x = "Market Price on PredictIt.org",
+       y = "Probability of Winning")
+  
 
 ```
 
