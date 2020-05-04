@@ -1,0 +1,336 @@
+---
+title: "Market and Poll Data Processing"
+author: "Brendan Chapuis"
+date: "4/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, include = FALSE}
+
+library(readxl)
+library(tm)
+library(janitor)
+library(ggplot2)
+library(lubridate)
+library(gridExtra)
+library(rvest)
+library(broom)
+library(gt)
+library(tidyr)
+library(tidyverse)
+
+```
+
+
+```{r functions, echo = FALSE}
+
+# Takes a poll data file from FiveThirtyEight and cleans it up
+
+get_poll_data <- function(poll_file) {
+  read_csv(poll_file) %>% 
+    clean_names() %>%
+    select(-timestamp) %>% 
+    rename(c(name = "candidate_name",
+             date = "modeldate",
+             poll_estimate = "pct_estimate",
+             poll_trend_adjusted = "pct_trend_adjusted",
+             contest_date = "contestdate")) %>% 
+    mutate(date = as.Date(date, "%m/%d/%Y"),
+           contest_date = as.Date(contest_date, "%m/%d/%Y"),
+           poll_estimate = poll_estimate * .01,
+           poll_trend_adjusted = round(poll_trend_adjusted * .01, 4),
+           name = str_replace_all(name, pattern = c(
+             "Bernard Sanders" = "Bernie Sanders",
+             "Joseph R\\. Biden Jr\\." = "Joe Biden",
+             "Hillary Rodham Clinton" = "Hillary Clinton"
+           )))
+}
+
+# Takes market data from PredictIt and cleans it up
+
+add_market_data <- function(market_file, state_name, date_of_contest, poll_data) {
+  read_csv(market_file, col_types = cols(
+  ContractName = col_character(),
+  Date = col_character(),
+  OpenSharePrice = col_character(),
+  HighSharePrice = col_character(),
+  LowSharePrice = col_character(),
+  CloseSharePrice = col_character(),
+  TradeVolume = col_double()
+)
+  ) %>% 
+    rename(c(name = "ContractName",
+             date = "Date",
+              market_close = "CloseSharePrice", 
+              market_volume = "TradeVolume")) %>% 
+    select(name, date, market_close, market_volume) %>%
+    mutate(date = as.Date(date, "%m/%d/%Y"),
+           market_close = str_replace_all(market_close, 
+                                          pattern = c("\\$" = "")),
+           market_close = as.numeric(as.character(market_close)),
+           market_volume = as.numeric(market_volume),
+           name = str_replace_all(name, pattern = c(
+             "Sanders" = "Bernie Sanders",
+             "Biden" = "Joe Biden",
+             "Warren" = "Elizabeth Warren",
+             "Buttigieg" = "Pete Buttigieg",
+             "Klobuchar" = "Amy Klobuchar",
+             "Gabbard" = "Tulsi Gabbard",
+             "Bloomberg" = "Michael Bloomberg",
+             "Yang" = "Andrew Yang",
+             "Patrick" = "Deval Patrick",
+             "Clinton" = "Hillary Clinton",
+             "O'Malley" = "Martin O'Malley"
+           )),
+           state = state_name) %>% 
+    full_join(poll_data, by = c(date = "date", name = "name", state = "state")) %>% 
+    {if ("market_close.x" %in% colnames(.)) 
+      mutate(., market_close = ifelse(!is.na(market_close.x), 
+                               market_close.x, 
+                               market_close.y),
+             market_volume = ifelse(!is.na(market_volume.x), 
+                                market_volume.x, 
+                                market_volume.y)) 
+      else .} %>% 
+  select(state, contest_date, name, date, market_close, market_volume, poll_estimate, poll_trend_adjusted)
+}
+
+# Creates new tibble with just the market price and poll data from the day
+# before the election, along with the final results of the election. Also
+# creates a ranking based on each of those variables.
+
+
+final_results <- function(link, num_candidates, state_name, num_col = 4, nodes = ".e-name-display , .e-percent-val , .e-votes-display, .e-del-display") {
+  results_data <- read_html(link) %>% 
+    html_nodes(nodes) %>%
+    html_text() %>%
+    matrix(nrow = num_candidates, ncol = num_col, byrow = TRUE) %>% 
+    as.data.frame() %>% 
+    rename(c(name = "V1",
+             votes = "V2",
+             vote_percent = "V3")) %>%
+    mutate(state = state_name,
+           name = as.character(name),
+           name = str_remove(name, pattern = "\n"),
+           name = trimws(name, which = c("both")),
+           name = str_replace_all(name, 
+                                  pattern = c("Joseph R\\. Biden Jr\\." = "Joe Biden",
+                                              "Michael R\\. Bloomberg" = "Michael Bloomberg")),
+           final_rank = 1:num_candidates,
+           votes = str_remove(votes, pattern = "\\,"),
+           vote_percent = as.numeric(as.character(vote_percent)) * .01) %>% 
+    filter(name != "Others", name != "Uncommitted")
+  
+  twentytwenty_poll %>%
+    filter(state == state_name) %>% 
+    left_join(results_data, by = c(name = "name", state = "state")) %>% 
+    filter(vote_percent > 0) %>% 
+    select(state, name, date, vote_percent, market_close, poll_estimate, poll_trend_adjusted, final_rank, contest_date, date_dropped) %>% 
+    rbind(twentytwenty_primary)
+}
+
+
+```
+
+```{r 2020_poll_data, include = FALSE, cache = TRUE}
+
+twentytwenty_markets <- c(
+    "Alabama",
+    "Arizona",
+    "Arkansas",
+    "California",
+    "Colorado",
+    "Florida",
+    "Idaho",
+    "Illinois",
+    "Iowa",
+    "Maine",
+    "Massachusetts",
+    "Michigan",
+    "Minnesota",
+    "Mississippi",
+    "Missouri",
+    "Nevada",
+    "New Hampshire",
+    "North Carolina",
+    "Oklahoma",
+    "South Carolina",
+    "Tennessee",
+    "Texas",
+    "Utah",
+    "Vermont",
+    "Virginia",
+    "Washington",
+    "Wisconsin"
+)
+
+twentytwenty_poll <- get_poll_data("2020-data/pres_primary_avgs_2020.csv")
+
+for (val in twentytwenty_markets) {
+  twentytwenty_poll <- add_market_data(paste("2020-data/",val,".csv", sep = ""), val, poll_data = twentytwenty_poll)
+}
+
+twentytwenty_poll <- twentytwenty_poll %>% 
+  filter(!is.na(market_close), !is.na(poll_trend_adjusted)) %>% 
+  mutate(date_dropped = case_when(name == "Bernie Sanders" ~ "04/08/2020",
+                                  name == "Tulsi Gabbard" ~ "03/19/2020",
+                                  name == "Elizabeth Warren" ~ "03/05/2020",
+                                  name == "Michael Bloomberg" ~ "03/04/2020",
+                                  name == "Amy Klobuchar" ~ "03/02/2020",
+                                  name == "Pete Buttigieg" ~ "03/01/2020",
+                                  name == "Tom Steyer" ~ "02/29/2020",
+                                  name == "Deval Patrick" ~ "02/12/2020",
+                                  name == "Andrew Yang" ~ "02/11/2020"),
+         date_dropped = as.Date(date_dropped, "%m/%d/%Y")) %>% 
+  filter(date_dropped >= contest_date | is.na(date_dropped))
+
+```
+
+```{r 2020_twentytwenty_primary, include = FALSE, cache = TRUE}
+
+twentytwenty_primary = NULL
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/02/04/us/elections/results-iowa-caucus.html", 14, "Iowa")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/02/11/us/elections/results-new-hampshire-primary-election.html", 35, "New Hampshire")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/02/22/us/elections/results-nevada-caucus.html", 13, "Nevada")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/03/us/elections/results-alabama-president-democrat-primary-election.html", 15, "Alabama")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/03/us/elections/results-massachusetts-president-democrat-primary-election.html", 16, "Massachusetts")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/17/us/elections/results-arizona-president-democrat-primary-election.html", 18, "Arizona")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/03/us/elections/results-arkansas-primary-elections.html", 18, "Arkansas", num_col = 3)
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/03/us/elections/results-california-primary-elections.html", 32, "California", num_col = 3)
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/03/us/elections/results-colorado-president-democrat-primary-election.html", 15, "Colorado")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/17/us/elections/results-florida-president-democrat-primary-election.html", 16, "Florida")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/10/us/elections/results-idaho-president-democrat-primary-election.html?action=click&module=ELEX_results&pgtype=Interactive&region=StateNavigation", 17, "Idaho", num_col = 3)
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/17/us/elections/results-illinois-primary-elections.html", 13, "Illinois", nodes = ".e-has-image .e-name-display , .e-del-display , .e-has-image .e-percent-val , .e-has-image .e-votes-display")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/03/us/elections/results-maine-primary-elections.html", 12, "Maine", num_col = 3)
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/10/us/elections/results-michigan-president-democrat-primary-election.html", 16, "Michigan")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/03/us/elections/results-minnesota-president-democrat-primary-election.html", 16, "Minnesota")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/10/us/elections/results-missouri-president-democrat-primary-election.html", 23, "Missouri")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/03/us/elections/results-oklahoma-president-democrat-primary-election.html", 14, "Oklahoma")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/02/29/us/elections/results-south-carolina-primary-election.html", 12, "South Carolina")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/03/us/elections/results-tennessee-president-democrat-primary-election.html", 16, "Tennessee")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/03/us/elections/results-utah-president-democrat-primary-election.html", 16, "Utah")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/03/us/elections/results-vermont-president-democrat-primary-election.html", 13, "Vermont")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/03/us/elections/results-virginia-president-democrat-primary-election.html", 14, "Virginia")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/03/us/elections/results-texas-primary-elections.html", 29, "Texas", num_col = 3)
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/10/us/elections/results-mississippi-primary-elections.html", 10, num_col = 3, "Mississippi", nodes = ".e-has-image .e-name-display , .e-has-image .e-percent-val , .e-has-image .e-votes-display")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/03/us/elections/results-north-carolina-primary-elections.html", 21, num_col = 3, "North Carolina")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/03/10/us/elections/results-washington-president-democrat-primary-election.html", 14, num_col = 3, "Washington")
+
+twentytwenty_primary <- final_results("https://www.nytimes.com/interactive/2020/04/07/us/elections/results-wisconsin-president-democrat-primary-election.html", 13, "Wisconsin")
+
+twentytwenty_primary <- twentytwenty_primary %>%
+  mutate(winner = ifelse(final_rank == 1, 1, 0),
+         year = 2020) %>% 
+  select(-final_rank)
+
+```
+
+```{r historical_data, echo = FALSE}
+
+twentysixteen_poll <- get_poll_data("2016-data/pres_primary_avgs_1980-2016.csv") %>%
+  filter(race == "2016D") %>% 
+  select(-comment,-candidate_id)
+
+twentysixteen_markets <- c(
+    "Alabama",
+    "Arizona",
+    "Arkansas",
+    "California",
+    "Colorado",
+    "Florida",
+    "Georgia",
+    "Indiana",
+    "Iowa",
+    "Kentucky",
+    "Louisiana",
+    "Maine",
+    "Massachusetts",
+    "Michigan",
+    "Minnesota",
+    "Mississippi",
+    "Missouri",
+    "Montana",
+    "Nebraska",
+    "Nevada",
+    "New Hampshire",
+    "New Jersey",
+    "New Mexico",
+    "New York",
+    "North Carolina",
+    "North Dakota",
+    "Ohio",
+    "Oregon",
+    "Rhode Island",
+    "South Carolina",
+    "Tennessee",
+    "Texas",
+    "Vermont",
+    "Virginia",
+    "West Virginia",
+    "Wisconsin",
+    "Wyoming"
+)
+
+for (val in twentysixteen_markets) {
+  twentysixteen_poll <- add_market_data(paste("2016-data/",val,".csv", sep = ""), val, poll_data = twentysixteen_poll)
+}
+
+twentysixteen_poll <- twentysixteen_poll %>% 
+  filter(!is.na(market_close), !is.na(poll_trend_adjusted)) %>% 
+  mutate(date_dropped = case_when(name == "Martin O'Malley" ~ "02/01/2016"),
+         date_dropped = as.Date(date_dropped, "%m/%d/%Y")) %>% 
+  filter(date_dropped >= contest_date | is.na(date_dropped))
+
+twentysixteen_results <- read_csv("2016-data/2016_dem_primary_results.csv",
+                                  col_types = cols(
+  state = col_character(),
+  name = col_character(),
+  vote_percent = col_double()
+))
+
+twentysixteen_primary <- twentysixteen_poll %>% 
+  left_join(twentysixteen_results, by = c("state", "name")) %>% 
+  mutate(vote_percent = vote_percent * 0.01,
+         year = 2016) %>% 
+  select(year, state, name, date, everything(), -market_volume) %>% 
+  mutate(winner = replace_na(winner, 0))
+
+```
+
+```{r joined_data, echo = FALSE}
+
+dem_primary <- twentysixteen_primary %>% 
+  rbind(twentytwenty_primary)
+
+```
+

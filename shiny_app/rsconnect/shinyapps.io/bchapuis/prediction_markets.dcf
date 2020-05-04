@@ -1,0 +1,13 @@
+name: prediction_markets
+title: prediction_markets
+username:
+account: bchapuis
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 2192573
+bundleId: 3099359
+url: https://bchapuis.shinyapps.io/prediction_markets/
+when: 1588562517.29544
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: final_results_data.csv|winner_predictions.csv
