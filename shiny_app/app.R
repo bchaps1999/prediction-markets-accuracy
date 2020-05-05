@@ -178,7 +178,7 @@ ui <- navbarPage(
         "Predictions Over Time",
         column(5,
                wellPanel(
-                   h4("Changes in Prediction Accuracy Over Time"),
+                   h3("Changes in Prediction Accuracy Over Time"),
                    p(
                        "To evaluate changes in prediction accuracy over time, a subset of the data was created that had sufficient poll and market data for all thirty days preceding each election. Since not all elections had this necessary data, only 42 elections were used to evaluate changes in prediction accuracy over time."
                    ),
