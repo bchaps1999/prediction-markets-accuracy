@@ -53,10 +53,61 @@ final_results <- dem_primary %>%
 
 ```{r analysis, echo = FALSE}
 
-# Functions to calculate prediction accuracy over time
+# Calculate prediction accuracy over time
+
+thirty_day_primary <- dem_primary %>%
+  filter(
+    state %in% c(
+      "California",
+      "Georgia",
+      "Iowa",
+      "Kentucky",
+      "Massachusetts",
+      "Minnesota",
+      "Montana",
+      "New Hampshire",
+      "New Jersey",
+      "Nevada",
+      "Oregon",
+      "Rhode Island",
+      "South Carolina",
+      "Tennessee",
+      "Texas",
+      "Vermont",
+      "Virginia",
+      "West Virginia"
+    ) &
+      year == 2016 |
+      state %in% c(
+        "Wisconsin",
+        "Washington",
+        "North Carolina",
+        "Mississippi",
+        "Texas",
+        "Virginia",
+        "Utah",
+        "Tennessee",
+        "South Carolina",
+        "Oklahoma",
+        "Missouri",
+        "Minnesota",
+        "Michigan",
+        "Maine",
+        "Illinois",
+        "Florida",
+        "Colorado",
+        "California",
+        "Arizona",
+        "Massachusetts",
+        "Alabama",
+        "Nevada",
+        "New Hampshire",
+        "Iowa"
+      ) & year == 2020
+  )
 
 market_predictions <- function(days_before) {
-  dem_primary %>%
+  thirty_day_primary %>%
     filter(date == contest_date - days_before) %>%
     group_by(state, year) %>%
     arrange(desc(market_close)) %>%
@@ -80,7 +131,7 @@ market_predictions <- function(days_before) {
 }
 
 poll_predictions <- function(days_before) {
-  dem_primary %>%
+  thirty_day_primary %>%
     filter(date == contest_date - days_before) %>%
     group_by(state, year) %>%
     arrange(desc(poll_estimate)) %>%
@@ -97,13 +148,13 @@ poll_predictions <- function(days_before) {
     pull(poll_accuracy)
 }
 
-# Changes in prediction accuracy over time
-
-predictions_over_time <- tibble(days_before = c(1:50)) %>%
+predictions_over_time <- tibble(days_before = c(1:30)) %>%
   mutate(
     market = map_dbl(days_before, market_predictions),
     poll = map_dbl(days_before, poll_predictions)
   )
+
+# Table for accuracy over time
 
 predictions_over_time %>%
   summarize(
@@ -115,6 +166,8 @@ predictions_over_time %>%
              subtitle = "For 50 Days Preceding Election") %>%
   cols_label(average_market_accuracy = "Average Market Accuracy",
              average_poll_accuracy = "Average Poll Accuracy")
+
+# Plot for accuracy over time
 
 predictions_over_time %>%
   pivot_longer(
@@ -133,10 +186,10 @@ predictions_over_time %>%
     y = "Accuracy of Predictions",
     color = "Prediction Type"
   ) +
-  scale_color_discrete(labels = c("Polling Average", "Prediction Market Price")) +
+  scale_color_discrete(labels = c("Prediction Market Price", "Polling Average")) +
   theme(legend.position = "bottom")
 
-# Predictions data table
+# Predictions - table
 
 predictions <- final_results %>%
   group_by(state, year) %>% 
@@ -152,7 +205,7 @@ predictions <- final_results %>%
          poll_correct = ifelse(poll_winner == winner,1,0)) %>% 
   ungroup()
 
-# Simple percent accuracy
+# Simple percent accuracy - table
 
 predictions %>% 
   summarize(poll_accuracy = round(sum(poll_correct)/n() * 100, 2),
@@ -163,7 +216,8 @@ predictions %>%
   cols_label(poll_accuracy = "Polling Average Accuracy",
              market_accuracy = "Market Price Accuracy")
 
-# Percent error from prediction
+# Percent error from prediction - table
+
 final_results %>% 
   mutate(market_error = abs(market_close - vote_percent),
          poll_error = abs(poll_estimate - vote_percent)) %>%
@@ -177,7 +231,7 @@ final_results %>%
              average_poll_error = "Poll Average Error")
 
 
-# Logistic model for predicting winner
+# Logistic model for predicting winner - table
 
 logistic_mod <- logistic_reg() %>%
     set_engine("glm") %>%
@@ -199,22 +253,5 @@ logistic_mod %>%
   cols_label(model_accuracy = "Percent Accuracy of Model",
              difference = "Percentage Point Increase in Accuracy")
 
-
-# Linear model for predicting vote percent
-
-linear_mod <- linear_reg() %>%
-  set_engine("lm") %>% 
-  set_mode("regression")
-
-linear_mod %>%
-  fit(vote_percent ~ poll_estimate * poly(market_close, 3, raw=TRUE), data = vote_train) %>%
-  predict(new_data = vote_test) %>%
-  bind_cols(vote_test) %>%
-  mutate(model_predicted = .pred) %>%
-  mutate(model_error = abs(model_predicted - vote_percent)) %>%
-  filter(!is.na(model_error)) %>%
-  summarize(average_model_error = round(mean(model_error) * 100,2)) %>%
-  rbind(vote_predictions_one)
-  
 
 ```
