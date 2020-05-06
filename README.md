@@ -10,7 +10,7 @@ Some studies have suggested that these markets, which often have hundreds of tho
 
 ### Data Sources
 
-The polling data used in this project is from [FiveThirtyEight's estimated polling average](https://github.com/fivethirtyeight/data/tree/master/polls) for each candidate. The prediction market data is from [PredictIt.org](https://www.predictit.org), and the daily closing market price will be used as the default value. Election results are from the [New York Times](https://www.nytimes.com/news-event/2020-election) and various state websites. Candidates were included in the data set only if they had sufficient market, polling, and election results data for a specific state. States were only included if there was more than one remaining candidate with enough data. As a result, only 59 primaries and caucuses from the two election years are included in the data.
+The polling data used in this project is from [FiveThirtyEight's estimated polling average](https://github.com/fivethirtyeight/data/tree/master/polls) for each candidate. The prediction market data is from [PredictIt.org](https://www.predictit.org/), and the daily closing market price will be used as the default value. Election results are from the [New York Times](https://www.nytimes.com/news-event/2020-election) and various state websites. Candidates were included in the data set only if they had sufficient market, polling, and election results data for a specific state. States were only included if there was more than one remaining candidate with enough data. As a result, only 59 primaries and caucuses from the two election years are included in the data.
 
 ### Features
 
