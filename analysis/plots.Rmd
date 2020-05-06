@@ -18,7 +18,7 @@ library(tidyverse)
 
 ```{r data, include = FALSE}
 
-dem_primary <- read_csv("processed-data/dem_primary.csv", col_types = cols(
+dem_primary <- read_csv("dem_primary.csv", col_types = cols(
   year = col_double(),
   state = col_character(),
   name = col_character(),
@@ -32,9 +32,14 @@ dem_primary <- read_csv("processed-data/dem_primary.csv", col_types = cols(
   winner = col_double()
 )) 
 
+final_results <- dem_primary %>% 
+  filter(date == contest_date -1)
+
 ```
 
 ```{r market_and_votes, echo = FALSE}
+
+# Relationship between market price and vote percent
 
 dem_primary %>%
   filter(date == contest_date - 1) %>% 
@@ -53,6 +58,8 @@ dem_primary %>%
 ```
 
 ``` {r poll_and_votes, echo = FALSE}
+
+# Relationship between polling average and vote percent
 
 dem_primary %>%
   filter(date == contest_date - 1) %>%
@@ -73,8 +80,7 @@ dem_primary %>%
 
 ```{r winner_regression, echo = FALSE}
 
-final_results <- dem_primary %>% 
-  filter(date == contest_date -1)
+# Using logistic regression to model probability of winning
 
 final_results %>%
   ggplot(aes(x = market_close, y = winner)) + 
@@ -86,6 +92,33 @@ final_results %>%
        x = "Market Price on PredictIt.org",
        y = "Probability of Winning")
   
+
+```
+
+```{r over_time, echo = FALSE}
+
+# Changes in accuracy over time
+
+predictions_over_time %>%
+  pivot_longer(
+    cols = c(market, poll),
+    names_to = "prediction_type",
+    values_to = "value"
+  ) %>%
+  ggplot(aes(x = days_before, y = value, color = prediction_type)) +
+  geom_line() +
+  theme_grey() +
+  scale_x_reverse() +
+  labs(
+    title = "Changes in Prediction Accuracy Over Time",
+    subtitle = "Calculated As Percent of Elections Correctly Predicted",
+    x = "Days Before Election",
+    y = "Accuracy of Predictions",
+    color = "Prediction Type"
+  ) +
+  scale_color_discrete(labels = c("Prediction Market Price", "Polling Average")) +
+  theme(legend.position = "bottom")
+
 
 ```
 
