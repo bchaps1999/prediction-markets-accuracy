@@ -31,8 +31,10 @@ library(tidyverse)
 
 ```{r data, echo = FALSE}
 
+# Importing master file
+
 dem_primary <- read_csv(
-  "processed-data/dem_primary.csv",
+  "dem_primary.csv",
   col_types = cols(
     state = col_character(),
     contest_date = col_date(format = ""),
@@ -45,15 +47,37 @@ dem_primary <- read_csv(
   )
 )
 
+# Subset of data for day before each election
+
 final_results <- dem_primary %>% 
   filter(date == contest_date -1)
+
+# Predictions based on poll and market data
+
+predictions <- final_results %>%
+  group_by(state, year) %>%
+  arrange(desc(market_close)) %>%
+  mutate(
+    market_rank = 1:n(),
+    market_winner = ifelse(market_rank == 1, 1, 0),
+    market_correct = ifelse(market_winner == winner, 1, 0),
+    viable = ifelse(market_close > 0.01, 1, 0),
+    viable_candidates = sum(viable)
+  ) %>%
+  arrange(desc(poll_estimate)) %>%
+  mutate(
+    poll_rank = 1:n(),
+    poll_winner = ifelse(poll_rank == 1, 1, 0),
+    poll_correct = ifelse(poll_winner == winner, 1, 0)
+  ) %>%
+  ungroup()
     
 ```
 
 
-```{r analysis, echo = FALSE}
+```{r predictions over time, echo = FALSE}
 
-# Calculate prediction accuracy over time
+# Subset of data for only states with data thirty days before election
 
 thirty_day_primary <- dem_primary %>%
   filter(
@@ -106,6 +130,8 @@ thirty_day_primary <- dem_primary %>%
       ) & year == 2020
   )
 
+# Function to calculate market accuracy for any day
+
 market_predictions <- function(days_before) {
   thirty_day_primary %>%
     filter(date == contest_date - days_before) %>%
@@ -123,12 +149,12 @@ market_predictions <- function(days_before) {
       poll_correct = ifelse(poll_winner == winner, 1, 0)
     ) %>%
     ungroup() %>%
-    filter(winner == 1, !is.na(market_close)) %>% 
-    summarize(
-      market_accuracy = round(sum(market_correct) / n() * 100, 2)
-    ) %>% 
+    filter(winner == 1,!is.na(market_close)) %>%
+    summarize(market_accuracy = round(sum(market_correct) / n() * 100, 2)) %>%
     pull(market_accuracy)
 }
+
+# Function to calculate poll accuracy for any day
 
 poll_predictions <- function(days_before) {
   thirty_day_primary %>%
@@ -141,12 +167,12 @@ poll_predictions <- function(days_before) {
       poll_correct = ifelse(poll_winner == winner, 1, 0)
     ) %>%
     ungroup() %>%
-    filter(winner == 1, !is.na(poll_estimate)) %>% 
-    summarize(
-      poll_accuracy = round(sum(poll_correct) / n() * 100, 2)
-    ) %>% 
+    filter(winner == 1,!is.na(poll_estimate)) %>%
+    summarize(poll_accuracy = round(sum(poll_correct) / n() * 100, 2)) %>%
     pull(poll_accuracy)
 }
+
+# Data for changes in accuracy over time
 
 predictions_over_time <- tibble(days_before = c(1:30)) %>%
   mutate(
@@ -154,7 +180,11 @@ predictions_over_time <- tibble(days_before = c(1:30)) %>%
     poll = map_dbl(days_before, poll_predictions)
   )
 
-# Table for accuracy over time
+```
+
+```{r analysis_tables, echo = FALSE}
+
+# Average accuracy over time
 
 predictions_over_time %>%
   summarize(
@@ -167,66 +197,34 @@ predictions_over_time %>%
   cols_label(average_market_accuracy = "Average Market Accuracy",
              average_poll_accuracy = "Average Poll Accuracy")
 
-# Plot for accuracy over time
+# Simple percent accuracy
 
-predictions_over_time %>%
-  pivot_longer(
-    cols = c(market, poll),
-    names_to = "prediction_type",
-    values_to = "value"
+predictions %>%
+  summarize(
+    poll_accuracy = round(sum(poll_correct) / n() * 100, 2),
+    market_accuracy = round(sum(market_correct) / n() * 100, 2)
   ) %>%
-  ggplot(aes(x = days_before, y = value, color = prediction_type)) +
-  geom_line() +
-  theme_grey() +
-  scale_x_reverse() +
-  labs(
-    title = "Changes in Prediction Accuracy Over Time",
-    subtitle = "Calculated As Percent of Elections Correctly Predicted",
-    x = "Days Before Election",
-    y = "Accuracy of Predictions",
-    color = "Prediction Type"
-  ) +
-  scale_color_discrete(labels = c("Prediction Market Price", "Polling Average")) +
-  theme(legend.position = "bottom")
-
-# Predictions - table
-
-predictions <- final_results %>%
-  group_by(state, year) %>% 
-  arrange(desc(market_close)) %>% 
-  mutate(market_rank = 1:n(),
-         market_winner = ifelse(market_rank == 1, 1, 0),
-         market_correct = ifelse(market_winner == winner, 1, 0),
-         viable = ifelse(market_close > 0.01, 1, 0),
-         viable_candidates = sum(viable)) %>%
-  arrange(desc(poll_estimate)) %>% 
-  mutate(poll_rank = 1:n(),
-         poll_winner = ifelse(poll_rank == 1, 1, 0),
-         poll_correct = ifelse(poll_winner == winner,1,0)) %>% 
-  ungroup()
-
-# Simple percent accuracy - table
-
-predictions %>% 
-  summarize(poll_accuracy = round(sum(poll_correct)/n() * 100, 2),
-            market_accuracy = round(sum(market_correct)/n() * 100, 2)) %>% 
-  gt() %>% 
+  gt() %>%
   tab_header(title = "Percent Accuracy of Polls and Prediction Market",
-             subtitle = "For Predicting Election Winner") %>% 
+             subtitle = "For Predicting Election Winner") %>%
   cols_label(poll_accuracy = "Polling Average Accuracy",
              market_accuracy = "Market Price Accuracy")
 
-# Percent error from prediction - table
+# Percent error from prediction
 
-final_results %>% 
-  mutate(market_error = abs(market_close - vote_percent),
-         poll_error = abs(poll_estimate - vote_percent)) %>%
-  filter(!is.na(market_error) | !is.na(poll_error)) %>% 
-  summarize(average_market_error = round(mean(market_error) * 100,2),
-            average_poll_error = round(mean(poll_error)*100,2)) %>% 
-  gt() %>% 
+final_results %>%
+  mutate(
+    market_error = abs(market_close - vote_percent),
+    poll_error = abs(poll_estimate - vote_percent)
+  ) %>%
+  filter(!is.na(market_error) | !is.na(poll_error)) %>%
+  summarize(
+    average_market_error = round(mean(market_error) * 100, 2),
+    average_poll_error = round(mean(poll_error) * 100, 2)
+  ) %>%
+  gt() %>%
   tab_header(title = "Average Percent Error of Polls and Prediction Market",
-             subtitle = "For Predicting Vote Percent") %>% 
+             subtitle = "For Predicting Vote Percent") %>%
   cols_label(average_market_error = "Market Average Error",
              average_poll_error = "Poll Average Error")
 
@@ -234,11 +232,12 @@ final_results %>%
 # Logistic model for predicting winner - table
 
 logistic_mod <- logistic_reg() %>%
-    set_engine("glm") %>%
-    set_mode("classification")
+  set_engine("glm") %>%
+  set_mode("classification")
 
 logistic_mod %>%
-  fit(factor(winner) ~ market_close + poll_estimate + viable_candidates, data = predictions) %>%
+  fit(factor(winner) ~ market_close + poll_estimate + viable_candidates,
+      data = predictions) %>%
   predict(new_data = predictions) %>%
   bind_cols(predictions) %>%
   mutate(model_predicted = .pred_class) %>%
