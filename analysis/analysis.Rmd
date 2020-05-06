@@ -33,6 +33,7 @@ library(tidyverse)
 
 # Importing master file
 
+
 dem_primary <- read_csv(
   "dem_primary.csv",
   col_types = cols(
@@ -49,8 +50,8 @@ dem_primary <- read_csv(
 
 # Subset of data for day before each election
 
-final_results <- dem_primary %>% 
-  filter(date == contest_date -1)
+final_results <- dem_primary %>%
+  filter(date == contest_date - 1)
 
 # Predictions based on poll and market data
 
@@ -71,13 +72,14 @@ predictions <- final_results %>%
     poll_correct = ifelse(poll_winner == winner, 1, 0)
   ) %>%
   ungroup()
-    
+
 ```
 
 
-```{r predictions over time, echo = FALSE}
+```{r predictions_over_time, echo = FALSE}
 
 # Subset of data for only states with data thirty days before election
+
 
 thirty_day_primary <- dem_primary %>%
   filter(
@@ -149,7 +151,7 @@ market_predictions <- function(days_before) {
       poll_correct = ifelse(poll_winner == winner, 1, 0)
     ) %>%
     ungroup() %>%
-    filter(winner == 1,!is.na(market_close)) %>%
+    filter(winner == 1, !is.na(market_close)) %>%
     summarize(market_accuracy = round(sum(market_correct) / n() * 100, 2)) %>%
     pull(market_accuracy)
 }
@@ -167,7 +169,7 @@ poll_predictions <- function(days_before) {
       poll_correct = ifelse(poll_winner == winner, 1, 0)
     ) %>%
     ungroup() %>%
-    filter(winner == 1,!is.na(poll_estimate)) %>%
+    filter(winner == 1, !is.na(poll_estimate)) %>%
     summarize(poll_accuracy = round(sum(poll_correct) / n() * 100, 2)) %>%
     pull(poll_accuracy)
 }
